@@ -16,8 +16,9 @@ const authToken = process.env.AUTH_TOKEN;
 
 const client = twilio(accountSid, authToken);
 let messages = []; // Mocked database for SMS messages and others
-const AccessToken = twilio.jwt.AccessToken;
-const VoiceGrant = AccessToken.VoiceGrant;
+const { AccessToken } = require("twilio").jwt;
+const { VoiceGrant } = require("twilio").jwt.AccessToken;
+const { VoiceResponse } = require("twilio").twiml; // Import VoiceResponse
 
 // Initialize app
 const app = express();
