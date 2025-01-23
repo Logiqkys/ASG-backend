@@ -2,36 +2,171 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
+const nodemailer = require("nodemailer");
+const imapSimple = require("imap-simple");
+const { simpleParser } = require("mailparser");
+const http = require("http");
 const twilio = require("twilio");
+const { Server } = require("socket.io");
 require("dotenv").config();
 const path = require("path");
 
 const accountSid = process.env.ACCOUNT_SID;
 const authToken = process.env.AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
+let messages = []; // Mocked database for SMS messages and others
 
+// Initialize app
 const app = express();
 const upload = multer({
   dest: "uploads/",
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }, // Limit file size to 5MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/png", "application/pdf"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      const error = new Error(
+        "Invalid file type. Only JPEG, PNG, and PDF are allowed."
+      );
+      error.status = 400;
+      return cb(error);
+    }
+    cb(null, true);
+  },
 });
-const corsOptions = {
-  origin: "*", // Allow all origins for simplicity
-  methods: ["GET", "POST"],
-};
-app.use(cors(corsOptions));
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+// Middleware
+app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-let messages = []; // Mocked database for SMS messages
+// Serve static files
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Endpoint to send SMS
+// ---- IMAP Configuration (Email) ----
+const imapConfig = {
+  imap: {
+    user: process.env.IMAP_USER,
+    password: process.env.IMAP_PASS,
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
+    authTimeout: 3000,
+    tlsOptions: {
+      rejectUnauthorized: false,
+    },
+  },
+};
+
+// Nodemailer Transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS,
+  },
+});
+
+// ---- Email Endpoints ----
+
+// Send Email
+app.post("/emails/send", upload.any(), (req, res) => {
+  const { to, cc, bcc, subject, body } = req.body;
+
+  const attachments = req.files.map((file) => ({
+    filename: file.originalname,
+    content: file.buffer,
+  }));
+
+  const mailOptions = {
+    from: process.env.GMAIL_USER,
+    to,
+    cc,
+    bcc,
+    subject,
+    text: body,
+    attachments,
+  };
+
+  transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      console.error("Error sending email:", error);
+      res.status(500).json({ message: "Failed to send email", error });
+    } else {
+      console.log("Email sent:", info.response);
+      res.json({ message: "Email sent successfully!" });
+    }
+  });
+});
+
+// Fetch Latest Email
+app.get("/emails/latest", async (req, res) => {
+  try {
+    const connection = await imapSimple.connect(imapConfig);
+    await connection.openBox("INBOX");
+
+    const searchCriteria = ["ALL"];
+    const fetchOptions = {
+      bodies: ["HEADER", "TEXT", ""],
+      struct: true,
+    };
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    if (messages.length === 0) {
+      return res.status(404).json({ message: "No emails found." });
+    }
+
+    const latestEmail = messages[messages.length - 1];
+    const allParts = imapSimple.getParts(latestEmail.attributes.struct);
+    const attachments = [];
+
+    for (const part of allParts) {
+      if (
+        part.disposition &&
+        part.disposition.type.toUpperCase() === "ATTACHMENT"
+      ) {
+        const attachment = await connection.getPartData(latestEmail, part);
+        attachments.push({
+          filename: part.disposition.params.filename,
+          content: attachment,
+        });
+      }
+    }
+
+    const rawEmail = latestEmail.parts.find((part) => part.which === "").body;
+    const parsedEmail = await simpleParser(rawEmail);
+
+    res.json({
+      subject: parsedEmail.subject,
+      from: parsedEmail.from.text,
+      to: parsedEmail.to.text,
+      cc: parsedEmail.cc ? parsedEmail.cc.text : null,
+      bcc: parsedEmail.bcc ? parsedEmail.bcc.text : null,
+      textBody: parsedEmail.text,
+      htmlBody: parsedEmail.html,
+      attachments: attachments.map((att) => ({ filename: att.filename })),
+    });
+
+    connection.end();
+  } catch (error) {
+    console.error("Error fetching email:", error);
+    res.status(500).json({ message: "Failed to fetch email", error });
+  }
+});
+
+// ---- SMS Endpoints ----
+
+// Send SMS
 app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
   const { to, body } = req.body;
   const mediaFile = req.file;
   const messageOptions = { from: "+19016574402", to, body };
-
-  console.log("Received request to send SMS:", { to, body });
 
   if (mediaFile) {
     const fileUrl = `https://asg-backend-dwi1.onrender.com/uploads/${mediaFile.filename}`;
@@ -51,16 +186,14 @@ app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
     });
 });
 
-// Endpoint to receive incoming SMS
+// Fetch Sent SMS
 app.get("/sms/sent", async (req, res) => {
   try {
-    console.log("Fetching sent messages...");
     const messages = await client.messages.list({
-      from: "+19016574402", // Filter by Twilio virtual phone number
-      limit: 20, // Adjust the limit as needed
+      from: "+19016574402",
+      limit: 20,
     });
 
-    console.log("Sent messages fetched successfully:", messages);
     const formattedMessages = messages.map((msg) => ({
       sid: msg.sid,
       to: msg.to,
@@ -75,16 +208,29 @@ app.get("/sms/sent", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// Endpoint to fetch all received messages
+
+// Fetch All Received SMS
 app.get("/sms/messages", (req, res) => {
-  console.log("Fetching all messages...");
-  res.json(messages); // Return inbox messages
+  res.json(messages);
 });
 
-// Serve static files
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// ---- Realtime Chat ----
+
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+
+  socket.on("chatMessage", (data) => {
+    console.log("Message received:", data);
+    io.emit("chatMessage", data);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("A user disconnected:", socket.id);
+  });
+});
 
 // Start server
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+const PORT = 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });

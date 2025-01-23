@@ -70,40 +70,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Endpoint to fetch stored SMS messages
-app.get("/sms/messages", (req, res) => {
-  // Fetch all messages where either the sender or recipient matches our numbers
-  const filteredMessages = messages.filter(
-    (message) =>
-      message.from === "+19137331695" ||
-      message.to === "+19137331695" ||
-      message.from === "+18777804236" ||
-      message.to === "+18777804236"
-  );
-  res.json(filteredMessages); // Return the filtered messages
-});
-
-app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
-  const { to, body } = req.body;
-  const mediaFile = req.file;
-  const messageOptions = { from: "+19137331695", to, body };
-
-  if (mediaFile) {
-    const fileUrl = `http://localhost:3000/uploads/${mediaFile.filename}`;
-    messageOptions.mediaUrl = [fileUrl];
-  }
-
-  client.messages
-    .create(messageOptions)
-    .then((message) => res.json({ success: true, sid: message.sid }))
-    .catch((error) =>
-      res.status(500).json({ success: false, error: error.message })
-    );
-});
-
-// Serve uploaded files publicly
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 // Endpoint to Send Email
 app.post("/emails/send", upload.any(), (req, res) => {
   const { to, cc, bcc, subject, body } = req.body;
@@ -133,28 +99,6 @@ app.post("/emails/send", upload.any(), (req, res) => {
       res.json({ message: "Email sent successfully!" });
     }
   });
-});
-
-// Modify the existing /sms/receive endpoint to store messages
-app.post("/sms/receive", (req, res) => {
-  const { From, Body } = req.body;
-
-  // Simulate receiving a message to the virtual number
-  const message = {
-    from: From,
-    to: "+18777804236", // Simulate message to virtual number
-    body: Body,
-    mediaUrl: null,
-  };
-
-  // Save the simulated message
-  messages.unshift(message);
-
-  // Emit the message to the frontend via Socket.IO
-  io.emit("newMessage", message);
-
-  console.log("Simulated message saved and emitted:", message);
-  res.status(200).send("SMS Simulated");
 });
 
 // Endpoint to fetch the latest email
