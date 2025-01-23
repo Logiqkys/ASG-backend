@@ -13,8 +13,11 @@ const path = require("path");
 
 const accountSid = process.env.ACCOUNT_SID;
 const authToken = process.env.AUTH_TOKEN;
+
 const client = twilio(accountSid, authToken);
 let messages = []; // Mocked database for SMS messages and others
+const AccessToken = twilio.jwt.AccessToken;
+const VoiceGrant = AccessToken.VoiceGrant;
 
 // Initialize app
 const app = express();
@@ -71,6 +74,73 @@ const transporter = nodemailer.createTransport({
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_PASS,
   },
+});
+
+// ---- Voice Endpoints ----
+// Generate Voice Access Token Endpoint
+// Generate Voice Access Token Endpoint
+// Generate Voice Access Token Endpoint
+app.post("/voice/token", (req, res) => {
+  console.log("TWILIO_ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID);
+  console.log("TWILIO_API_KEY:", process.env.TWILIO_API_KEY);
+  console.log("TWILIO_API_SECRET:", process.env.TWILIO_API_SECRET);
+  console.log("TWILIO_VOICE_APP_SID:", process.env.TWILIO_VOICE_APP_SID);
+
+  const { identity } = req.body; // Get identity from the request body
+
+  if (!identity) {
+    return res.status(400).json({ message: "Identity is required" });
+  }
+
+  try {
+    console.log("Generating token for identity:", identity);
+
+    // Initialize the AccessToken
+    const token = new AccessToken(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY,
+      process.env.TWILIO_API_SECRET,
+      { identity } // Pass identity correctly here
+    );
+
+    // Create a Voice Grant
+    const voiceGrant = new VoiceGrant({
+      outgoingApplicationSid: process.env.TWILIO_VOICE_APP_SID,
+      incomingAllow: true, // Allow incoming calls
+    });
+
+    // Add the Voice Grant to the token
+    token.addGrant(voiceGrant);
+
+    // Respond with the generated token
+    console.log("Token generated successfully");
+    res.json({ token: token.toJwt() });
+  } catch (error) {
+    console.error("Error generating token:", error.message);
+    res
+      .status(500)
+      .json({ message: "Failed to generate token", error: error.message });
+  }
+});
+
+// TwiML Endpoint for Incoming and Outgoing Calls
+app.post("/voice/call", (req, res) => {
+  const { to } = req.body;
+
+  const twiml = new VoiceResponse();
+
+  if (to) {
+    const dial = twiml.dial({ callerId: process.env.TWILIO_PHONE_NUMBER });
+    dial.number(to);
+  } else {
+    twiml.say("Thank you for calling! Please wait while we connect you.");
+  }
+
+  // Log the generated TwiML
+  console.log("Generated TwiML:", twiml.toString());
+
+  res.type("text/xml");
+  res.send(twiml.toString());
 });
 
 // ---- Email Endpoints ----
