@@ -34,7 +34,7 @@ app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
   console.log("Received request to send SMS:", { to, body });
 
   if (mediaFile) {
-    const fileUrl = `http://localhost:3000/uploads/${mediaFile.filename}`;
+    const fileUrl = `https://asg-backend-dwi1.onrender.com/uploads/${mediaFile.filename}`;
     messageOptions.mediaUrl = [fileUrl];
     console.log("File URL generated:", fileUrl);
   }
@@ -52,31 +52,29 @@ app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
 });
 
 // Endpoint to receive incoming SMS
-// Endpoint to receive incoming SMS
-// Endpoint to receive messages from webhook
-app.post("/sms/receive", (req, res) => {
-  const { From, To, Body, MediaUrl0 } = req.body;
+app.get("/sms/sent", async (req, res) => {
+  try {
+    console.log("Fetching sent messages...");
+    const messages = await client.messages.list({
+      from: "+19016574402", // Filter by Twilio virtual phone number
+      limit: 20, // Adjust the limit as needed
+    });
 
-  console.log("Received SMS webhook payload:", { From, To, Body, MediaUrl0 });
-
-  // Capture messages sent from the Twilio Phone Number
-  if (From === "+19016574402") {
-    const message = {
-      from: From, // Twilio Phone Number
-      to: To, // Recipient of the message
-      body: Body, // Message content
-      attachment: MediaUrl0 || null, // Media URL if present
-    };
-
-    messages.unshift(message); // Save the message to the inbox
-    console.log("Message saved to inbox:", message);
-  } else {
-    console.log("Message not saved. It was sent by:", From);
+    console.log("Sent messages fetched successfully:", messages);
+    const formattedMessages = messages.map((msg) => ({
+      sid: msg.sid,
+      to: msg.to,
+      from: msg.from,
+      body: msg.body,
+      dateSent: msg.dateSent,
+      status: msg.status,
+    }));
+    res.json({ success: true, messages: formattedMessages });
+  } catch (error) {
+    console.error("Error fetching sent messages:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
-
-  res.status(200).send("Webhook received successfully.");
 });
-
 // Endpoint to fetch all received messages
 app.get("/sms/messages", (req, res) => {
   console.log("Fetching all messages...");
