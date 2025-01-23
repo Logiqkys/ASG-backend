@@ -29,7 +29,7 @@ let messages = []; // Mocked database for SMS messages
 app.post("/sms/send", upload.single("mediaUrl"), (req, res) => {
   const { to, body } = req.body;
   const mediaFile = req.file;
-  const messageOptions = { from: "+19137331695", to, body };
+  const messageOptions = { from: "+19016574402", to, body };
 
   console.log("Received request to send SMS:", { to, body });
 
